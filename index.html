@@ -1407,18 +1407,6 @@ p{margin:0 0 1.1rem}
       });
     }
 
-    fetch(API + 'stats?evento=' + encodeURIComponent(EVENTO), { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.ok && d.stats && d.stats.invitados > 0) { pintarStats(d.stats); return; }
-        throw new Error('sin lista');
-      })
-      .catch(function () {
-        // Sin backend no hay números que enseñar: mejor esconder la sección que inventarlos.
-        var sec = $('#stats');
-        if (sec) sec.style.display = 'none';
-        if (hasGSAP && window.ScrollTrigger) ScrollTrigger.refresh();
-      });
 
     /* Un código en la liga (…/?c=ABC123) salta el primer paso. */
     (function () {
