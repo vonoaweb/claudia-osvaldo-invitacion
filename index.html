@@ -28,28 +28,9 @@ if (Date.now() > Date.parse('2026-10-25T23:59:59-06:00')) location.replace('venc
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Pinyon+Script&family=Jost:wght@200;300;400&display=swap" rel="stylesheet">
 
 <script>
-/* Maqueta: el RSVP responde aquí mismo, sin servidor. Nada se guarda ni se envía. */
-(function () {
-  var real = window.fetch.bind(window), inv = null;
-  function res(o) { return Promise.resolve(new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } })); }
-  window.fetch = function (url, op) {
-    var u = String(url);
-    if (u.indexOf('/wp-json/tge/v1/') < 0) return real(url, op);
-    if (u.indexOf('/invitado') > -1) {
-      if (!/codigo=DEMO\b/.test(u)) return res({ ok: false, mensaje: 'En esta maqueta entra con el código DEMO.' });
-      inv = { nombre: 'Familia Escalera', pases_max: 3, pases_confirmados: 0, confirmado: false, asiste: false };
-      return res({ ok: true, invitado: inv });
-    }
-    if (u.indexOf('/confirmar') > -1) {
-      var b = JSON.parse(op.body), tk = '';
-      for (var i = 0; i < 32; i++) tk += '0123456789abcdef'[Math.random() * 16 | 0];
-      inv = { nombre: 'Familia Escalera', pases_max: 3, pases_confirmados: b.pases, confirmado: true, asiste: b.asiste,
-              token: tk, pase_url: 'https://tugranevento.com/?tge_pase=' + tk };
-      return res({ ok: true, invitado: inv });
-    }
-    return res({ ok: false });
-  };
-})();
+/* Sistema de pases de Tu Gran Evento (Cloudflare). En local apunta a wrangler dev. */
+window.TGE_API = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://localhost:8787' : 'https://tugranevento.com') + '/pases/api/';
+window.TGE_EVENTO = 'claudia-osvaldo';
 </script>
 <style>
 :root{
@@ -625,6 +606,7 @@ p{margin:0 0 1.1rem}
 .thanks .ts{display:block;font-family:'Pinyon Script',cursive;font-size:clamp(3rem,10vw,4.2rem);line-height:1.1;color:var(--olive);margin-bottom:1rem}
 .thanks p{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.2rem;line-height:1.6;margin:0 auto;max-width:32ch}
 .thanks .tn{margin-top:1.6rem;font-family:'Jost',sans-serif;font-size:.6rem;letter-spacing:.3em;text-transform:uppercase;color:var(--gold)}
+.fm-vacio{grid-column:1/-1;text-align:center;font-style:italic;color:var(--ink-soft)}
 .anim{opacity:0}
 @media(prefers-reduced-motion:reduce){
   .anim{opacity:1!important}
@@ -960,6 +942,7 @@ p{margin:0 0 1.1rem}
           <div class="fld"><label for="fNombre">Tu nombre</label><input type="text" id="fNombre" placeholder="¿Quién escribe?" required></div>
           <div class="fld"><label for="fMsg">Tu mensaje</label><textarea id="fMsg" placeholder="Lo que les quieras decir…" required></textarea></div>
           <button class="btn btn-sm" type="submit" style="width:100%"><span>Firmar</span></button>
+          <p id="fmErr" role="alert" style="margin:.8rem 0 0;color:#9b3b3b;font-size:.92rem"></p>
         </form>
       </div>
       <div class="fm-grid" id="fmGrid"></div>
@@ -1118,8 +1101,8 @@ p{margin:0 0 1.1rem}
 
   /* RSVP · contra la lista de invitados real */
   (function () {
-    var API    = location.origin + '/wp-json/tge/v1/';
-    var EVENTO = 'claudia-osvaldo';
+    var API    = window.TGE_API;
+    var EVENTO = window.TGE_EVENTO;
 
     var invitado = null, n = 1, maxPases = 1;
     var pases = $('#pases');
@@ -1210,6 +1193,7 @@ p{margin:0 0 1.1rem}
       if (inv.dieta)   $('#dieta').value   = inv.dieta;
       if (inv.cancion) $('#cancion').value = inv.cancion;
       if (inv.mensaje) $('#mensaje').value = inv.mensaje;
+      if (inv.correo)  $('#correo').value  = inv.correo;
 
       if (inv.confirmado && !inv.asiste) {
         $$('input[name=asiste]').forEach(function (r) { r.checked = (r.value === 'no'); });
@@ -1257,7 +1241,8 @@ p{margin:0 0 1.1rem}
           pases:   va ? n : 0,
           dieta:   $('#dieta').value.trim(),
           cancion: $('#cancion').value.trim(),
-          mensaje: msg
+          mensaje: msg,
+          correo:  $('#correo').value.trim()
         })
       })
         .then(function (r) { return r.json(); })
@@ -1271,6 +1256,7 @@ p{margin:0 0 1.1rem}
           if (msg) firmar(d.invitado.nombre, msg);
           if (d.stats) pintarStats(d.stats);
           mostrarPase(d.invitado);
+          if (va && !d.correo_enviado) { var nt = $('#pasoPase .nota'); if (nt) nt.textContent = 'Guárdalo o toma captura; en la entrada lo escanean. Por ahora no pudimos enviártelo por correo.'; }
           if (va) confeti();
         })
         .catch(function () {
@@ -1470,15 +1456,8 @@ p{margin:0 0 1.1rem}
   }
 
   /* libro de firmas */
-  var SEED = [
-    { n: 'Renata & Pablo', m: 'Los hemos visto crecer juntos. Ya era hora, muchachos. Los queremos.' },
-    { n: 'Tía Lupita', m: 'Que nunca les falte el pan, la risa ni la paciencia. Bendiciones, mis niños.' },
-    { n: 'Sofía Mendoza', m: 'Clau, desde la prepa supe que te ibas a casar con alguien así. Qué felicidad.' },
-    { n: 'Los Ramírez', m: 'Ahí estaremos los cuatro. Ya reservamos hotel y todo. ¡A bailar!' },
-    { n: 'Diego A.', m: 'Osvaldo, hermano: te deseo toda la felicidad del mundo. Ahí estaremos.' },
-    { n: 'Abuela Carmen', m: 'Pedí mucho por ustedes. Dios los va a acompañar siempre.' }
-  ];
   function firmar(nom, msg, alFinal) {
+    var v0 = document.querySelector('.fm-vacio'); if (v0) v0.remove();
     var g = $('#fmGrid'), el = document.createElement('blockquote');
     el.className = 'fm';
     var p = document.createElement('p'); p.textContent = '“' + msg + '”';
@@ -1488,19 +1467,37 @@ p{margin:0 0 1.1rem}
     if (hasGSAP && !reduce && !alFinal) gsap.fromTo(el, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: .7, ease: 'power3.out' });
     return el;
   }
-  SEED.forEach(function (f) { firmar(f.n, f.m, true); });
+  fetch(window.TGE_API + 'firmas?evento=' + encodeURIComponent(window.TGE_EVENTO))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || !d.ok) return;
+      d.firmas.forEach(function (f) { firmar(f.nombre, f.mensaje, true); });
+      if (!d.firmas.length) { var v = document.createElement('p'); v.className = 'fm-vacio'; v.textContent = 'Sé el primero en dejarles unas palabras.'; $('#fmGrid').appendChild(v); }
+      if (hasGSAP) ScrollTrigger.refresh();
+    }).catch(function () {});
   $('#firmaForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var n = $('#fNombre').value.trim(), m = $('#fMsg').value.trim();
     if (!n || !m) return;
-    firmar(n, m); $('#fNombre').value = ''; $('#fMsg').value = '';
-    if (hasGSAP) ScrollTrigger.refresh();
+    var btn = this.querySelector('button[type=submit]'), er = $('#fmErr');
+    if (btn) btn.disabled = true; if (er) er.textContent = '';
+    fetch(window.TGE_API + 'firmas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ evento: window.TGE_EVENTO, nombre: n, mensaje: m }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (btn) btn.disabled = false;
+        if (!d.ok) { if (er) er.textContent = d.mensaje || 'No se pudo guardar tu mensaje.'; return; }
+        var v = document.querySelector('.fm-vacio'); if (v) v.remove();
+        firmar(n, m); $('#fNombre').value = ''; $('#fMsg').value = '';
+        if (hasGSAP) ScrollTrigger.refresh();
+      })
+      .catch(function () { if (btn) btn.disabled = false; if (er) er.textContent = 'No pudimos guardar tu mensaje. Revisa tu conexión.'; });
   });
 
   /* copiar */
   $$('[data-copy]').forEach(function (b) {
     b.addEventListener('click', function () {
-      var txt = $(b.getAttribute('data-copy')).textContent.trim();
+      var txt = $(b.getAttribute('data-copy')).textContent.replace(/\s+/g, '');
       var fin = function () {
         var c = b.parentNode.querySelector('[data-copied]'); if (!c) return;
         if (hasGSAP) gsap.fromTo(c, { opacity: 0 }, { opacity: 1, duration: .3, onComplete: function () { gsap.to(c, { opacity: 0, delay: 1.6, duration: .4 }); } });
